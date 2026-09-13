@@ -1,0 +1,61 @@
+name: YouTube Music Manager
+on:
+  schedule:
+    - cron: '23 14 * * *'
+  workflow_dispatch:
+    inputs:
+      mode:
+        description: Report only, or apply the exact edits saved in config.json
+        type: choice
+        options: [report, apply]
+        default: report
+  push:
+    paths:
+      - 'scripts/**'
+      - 'tests/**'
+      - '.github/workflows/youtube-automation.yml'
+      - 'config.json'
+permissions:
+  contents: read
+concurrency:
+  group: youtube-manager
+  cancel-in-progress: false
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m unittest discover -s tests -v
+  manage:
+    if: github.event_name != 'push'
+    needs: validate
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Generate report
+        if: inputs.mode != 'apply'
+        env:
+          YOUTUBE_API_KEY: ${{ secrets.YOUTUBE_API_KEY }}
+        run: python scripts/youtube_manager.py --mode report
+      - name: Apply configured metadata updates
+        if: github.event_name == 'workflow_dispatch' && inputs.mode == 'apply'
+        env:
+          YOUTUBE_CLIENT_ID: ${{ secrets.YOUTUBE_CLIENT_ID }}
+          YOUTUBE_CLIENT_SECRET: ${{ secrets.YOUTUBE_CLIENT_SECRET }}
+          YOUTUBE_REFRESH_TOKEN: ${{ secrets.YOUTUBE_REFRESH_TOKEN }}
+        run: python scripts/youtube_manager.py --mode apply
+      - name: Save report and any update backups
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: youtube-report-${{ github.run_id }}
+          path: reports/
+          retention-days: 14
+          if-no-files-found: ignore
